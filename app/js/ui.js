@@ -68,17 +68,6 @@
     open: () => tone(440, 0.1, "sine", 0.06),
   };
 
-  /* ---------- speech (system TTS; offline on Android) ---------- */
-  function speak(text) {
-    try {
-      if (!("speechSynthesis" in window)) return;
-      speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = "en-US"; u.rate = 0.92;
-      speechSynthesis.speak(u);
-    } catch (e) {}
-  }
-
   /* ---------- toast ---------- */
   let toastT = null;
   function toast(msg) {
@@ -264,5 +253,5 @@
     requestAnimationFrame(() => requestAnimationFrame(() => { c.style.strokeDashoffset = c.dataset.target; }));
   }
 
-  window.UI = { icon, tickSVG, crossSVG, dotSVG, $, $$, esc, sfx, speak, toast, modal, confirmBox, confetti, dropdown, calendar, ring, animateRing };
+  window.UI = { icon, tickSVG, crossSVG, dotSVG, $, $$, esc, sfx, toast, modal, confirmBox, confetti, dropdown, calendar, ring, animateRing };
 })();

@@ -394,7 +394,6 @@
       <div class="wcard ${seen.has(i) ? "seen" : ""}" data-i="${i}">
         <div class="inner">
           <div class="face front">
-            <button class="iconbtn mini speak" data-say="${esc(e.w)}" aria-label="pronounce">${icon("speaker")}</button>
             <span class="idx">${i + 1}/10</span>
             <div class="word">${esc(e.w)}</div>
             <div class="bnline bn">${esc(e.bn)}</div>
@@ -415,7 +414,6 @@
 
     $$(".wcard", wrap).forEach((card) => {
       card.onclick = (ev) => {
-        if (ev.target.closest(".speak")) return;
         card.classList.toggle("flipped");
         sfx.flip();
         const i = Number(card.dataset.i);
@@ -428,7 +426,6 @@
         }
       };
     });
-    $$(".speak", wrap).forEach((b) => b.onclick = (e) => { e.stopPropagation(); UI.speak(b.dataset.say); });
     $("#backB").onclick = () => go("lists");
     $("#markB").onclick = () => {
       if (Store.isStudied(list, group)) return go("lists");
@@ -725,7 +722,6 @@
                 <span class="m bn">${esc(m.bn)} · ${esc(m.en)}</span>
               </span>
               <span class="acts">
-                <button class="iconbtn mini" data-say="${esc(m.w)}" aria-label="pronounce">${icon("speaker")}</button>
                 <button class="iconbtn mini" data-drop="${m.id}" aria-label="remove">${icon("cross")}</button>
               </span>
             </div>`).join("")
@@ -753,7 +749,6 @@
         App.practicePool = pool;
       };
       $$("[data-drop]").forEach((b) => b.onclick = () => { Store.dropMistake(b.dataset.drop); sfx.click(); toast("Removed from Mistake Book"); paint(); });
-      $$("[data-say]").forEach((b) => b.onclick = () => UI.speak(b.dataset.say));
     }
     paint();
   };
