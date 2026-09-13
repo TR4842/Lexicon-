@@ -31,18 +31,23 @@
     };
   }
 
+  /* storage with in-memory fallback (some embedded webviews block localStorage) */
+  const mem = {};
+  const LS = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return k in mem ? mem[k] : null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { mem[k] = v; } },
+  };
+
   let S = load();
 
   function load() {
     try {
-      const raw = localStorage.getItem(KEY);
+      const raw = LS.get(KEY);
       if (raw) return Object.assign(blank(), JSON.parse(raw));
     } catch (e) { /* corrupted -> start fresh */ }
     return blank();
   }
-  function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
-  }
+  function save() { LS.set(KEY, JSON.stringify(S)); }
 
   /* ---------- date helpers ---------- */
   const pad = (n) => String(n).padStart(2, "0");
