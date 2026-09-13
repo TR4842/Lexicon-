@@ -21,6 +21,7 @@ const CORE = [
   "assets/fonts/noto-sans-bengali-bengali-400-normal.woff2",
   "assets/fonts/noto-sans-bengali-bengali-600-normal.woff2",
   "assets/fonts/noto-sans-bengali-bengali-700-normal.woff2",
+  "assets/icons/app-logo.png",
   "assets/icons/icon-192.png",
   "assets/icons/icon-512.png",
   "assets/icons/icon-maskable-512.png",

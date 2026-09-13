@@ -151,7 +151,7 @@
     let gender = cur.gender || null, avatar = cur.avatar || null, name = cur.name || "";
     shell.innerHTML = `
       <div class="onb">
-        <div class="logo-wrap"><img src="assets/icons/icon-192.png" alt="Vocab Ledger logo"></div>
+        <div class="logo-wrap"><img src="assets/icons/app-logo.png" alt="Vocab Ledger logo"></div>
         <h1>Vocab Ledger</h1>
         <svg class="wave" viewBox="0 0 150 12"><path d="M2 8c12-8 24 8 36 0s24 8 36 0 24 8 36 0 24 8 38 0" fill="none" stroke="#F58AA9" stroke-width="4" stroke-linecap="round"/></svg>
         <p class="tag">12 word lists · 1200 words · a gentle daily ritual.<br>Tell us about yourself to begin.</p>
@@ -757,7 +757,7 @@
   SCREENS.about = function () {
     $("#view").innerHTML = `
       <div class="card pad-lg center" style="margin-top:16px;background:var(--grad-sunset)">
-        <div class="about-logo"><img src="assets/icons/icon-192.png" alt="Vocab Ledger logo"></div>
+        <div class="about-logo"><img src="assets/icons/app-logo.png" alt="Vocab Ledger logo"></div>
         <h3 style="justify-content:center;font-size:1.5rem">Vocab Ledger</h3>
         <p class="hint" style="color:rgba(74,59,46,.75)">version 1.0 · fully offline · made with love</p>
       </div>

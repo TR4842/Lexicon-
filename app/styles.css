@@ -417,7 +417,7 @@ img{display:block;max-width:100%}
 .onb{min-height:100dvh;display:flex;flex-direction:column;justify-content:center;padding:26px 22px 40px}
 .onb .logo-wrap{display:grid;place-items:center;margin-bottom:10px;animation:floaty 5s ease-in-out infinite}
 @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
-.onb .logo-wrap img{width:118px;height:118px;border-radius:30px;box-shadow:var(--sh-3)}
+.onb .logo-wrap img{width:136px;height:auto;border-radius:0;box-shadow:none;filter:drop-shadow(0 16px 16px rgba(74,59,46,.26))}
 .onb h1{font-size:2.2rem;font-weight:900;text-align:center;line-height:1.05}
 .onb .tag{text-align:center;font-weight:700;color:var(--ink-soft);margin:8px 0 22px;font-size:.95rem}
 .onb .wave{display:block;margin:0 auto 4px;width:150px;height:12px}
@@ -477,7 +477,7 @@ img{display:block;max-width:100%}
 
 /* about */
 .about-logo{display:grid;place-items:center;padding:6px 0 2px}
-.about-logo img{width:96px;height:96px;border-radius:26px;box-shadow:var(--sh-2)}
+.about-logo img{width:112px;height:auto;border-radius:0;box-shadow:none;filter:drop-shadow(0 12px 12px rgba(74,59,46,.24))}
 .credit-line{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px dashed var(--line);font-weight:700;font-size:.94rem}
 .credit-line:last-child{border-bottom:0}
 .credit-line .ic{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;flex:0 0 auto;box-shadow:var(--sh-1)}
