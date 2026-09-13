@@ -1,5 +1,5 @@
 /* Vocab Ledger — offline service worker: precache everything, cache-first forever. */
-const VERSION = "vocab-ledger-v2";
+const VERSION = "vocab-ledger-v3";
 const CORE = [
   "./",
   "index.html",

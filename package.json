@@ -1,13 +1,15 @@
 {
   "name": "vocab-ledger",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Vocab Ledger - a fully offline, retro-pastel vocabulary learning app (12 word lists, 1200 words).",
   "private": true,
   "scripts": {
     "build:data": "python3 tools/build_vocab.py",
     "build:icons": "node tools/make-icons.js",
     "brand:android": "node tools/brand-android.js",
-    "test": "node tools/smoke.js",
+    "test": "npm run check:release && npm run test:smoke",
+    "test:smoke": "node tools/smoke.js",
+    "check:release": "node tools/check-release.js",
     "serve": "node tools/serve.js",
     "cap:sync": "cap sync android",
     "cap:open": "cap open android",
