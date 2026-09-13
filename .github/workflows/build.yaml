@@ -1,0 +1,250 @@
+name: Build
+
+# Builds and tests Vocab Ledger on every change, and publishes an installable
+# APK/AAB. The Android job always produces an artefact that installs *over* the
+# previous version: same applicationId, a higher versionCode, and (when the
+# keystore secrets exist) the same release signature.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      versionName:
+        description: 'versionName override (blank = version from package.json)'
+        required: false
+        default: ''
+        type: string
+      versionCode:
+        description: 'versionCode override (blank = DEFAULT_VERSION_CODE in android/app/build.gradle)'
+        required: false
+        default: ''
+        type: string
+      buildBundle:
+        description: 'Also build a signed .aab for the Play Store'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  JAVA_VERSION: '17'
+  APP_ID: com.tusherkhan.vocabledger
+  COMPILE_SDK: '34'
+  BUILD_TOOLS: '34.0.0'
+
+jobs:
+  # ---------------------------------------------------------------- web app --
+  web:
+    name: Web app · tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # tags + history: the release checks compare against them
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Release checks (version sync · offline precache · storage key)
+        run: node tools/check-release.js
+
+      - name: Headless E2E + upgrade/no-data-loss tests
+        run: node tools/smoke.js
+
+      - name: Archive the web bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-app
+          path: app/
+          if-no-files-found: error
+          retention-days: 14
+
+  # ------------------------------------------------------------------ android --
+  android:
+    name: Android · APK
+    runs-on: ubuntu-latest
+    needs: web
+    permissions:
+      contents: write             # only used to attach artefacts to a tag release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve version
+        id: ver
+        run: |
+          set -euo pipefail
+          VERSION_NAME="${{ inputs.versionName }}"
+          VERSION_CODE="${{ inputs.versionCode }}"
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME="$(node -p "require('./package.json').version")"
+          fi
+          if [ -z "$VERSION_CODE" ]; then
+            VERSION_CODE="$(sed -n "s/.*DEFAULT_VERSION_CODE = \([0-9]*\).*/\1/p" android/app/build.gradle)"
+          fi
+          {
+            echo "versionName=$VERSION_NAME"
+            echo "versionCode=$VERSION_CODE"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building Vocab Ledger $VERSION_NAME (versionCode $VERSION_CODE)"
+
+      - name: Make sure the Android SDK packages are present
+        run: |
+          set -uo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$(ls "$SDK_ROOT"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | tail -1 || true)"
+          if [ -n "$SDKMANAGER" ]; then
+            yes 2>/dev/null | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+            "$SDKMANAGER" "platform-tools" "platforms;android-${COMPILE_SDK}" "build-tools;${BUILD_TOOLS}" > /dev/null
+          else
+            echo "::warning::sdkmanager not found — using the preinstalled Android SDK"
+          fi
+
+      - name: Copy the web app into the Android project
+        run: npx cap sync android
+
+      - name: Prepare signing
+        id: sign
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KS_KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KS_B64:-}" ] || [ -z "${KS_PASS:-}" ] || [ -z "${KS_ALIAS:-}" ] || [ -z "${KS_KEY_PASS:-}" ]; then
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Unsigned build::Add ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD as repository secrets to get a release-signed APK. Falling back to a debug-signed build."
+            exit 0
+          fi
+          printf '%s' "$KS_B64" | base64 -d > android/release.keystore
+          printf 'storeFile=release.keystore\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$KS_PASS" "$KS_ALIAS" "$KS_KEY_PASS" > android/keystore.properties
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build release APK
+        if: steps.sign.outputs.signed == 'true'
+        run: |
+          cd android
+          ./gradlew --no-daemon --stacktrace assembleRelease \
+            -PversionName="${{ steps.ver.outputs.versionName }}" \
+            -PversionCode="${{ steps.ver.outputs.versionCode }}"
+
+      - name: Build debug APK (no release keystore configured)
+        if: steps.sign.outputs.signed != 'true'
+        run: |
+          cd android
+          ./gradlew --no-daemon --stacktrace assembleDebug \
+            -PversionName="${{ steps.ver.outputs.versionName }}" \
+            -PversionCode="${{ steps.ver.outputs.versionCode }}"
+
+      - name: Build Play bundle (.aab)
+        if: steps.sign.outputs.signed == 'true' && (startsWith(github.ref, 'refs/tags/v') || inputs.buildBundle == true)
+        run: |
+          cd android
+          ./gradlew --no-daemon bundleRelease \
+            -PversionName="${{ steps.ver.outputs.versionName }}" \
+            -PversionCode="${{ steps.ver.outputs.versionCode }}"
+
+      - name: Collect artefacts
+        id: pack
+        run: |
+          set -euo pipefail
+          VN="${{ steps.ver.outputs.versionName }}"
+          VC="${{ steps.ver.outputs.versionCode }}"
+          mkdir -p dist
+          APK="$(ls android/app/build/outputs/apk/release/*.apk 2>/dev/null | head -1 || true)"
+          if [ -z "$APK" ]; then APK="$(ls android/app/build/outputs/apk/debug/*.apk | head -1)"; fi
+          NAME="VocabLedger-${VN}-${VC}.apk"
+          cp "$APK" "dist/$NAME"
+          AAB="$(ls android/app/build/outputs/bundle/release/*.aab 2>/dev/null | head -1 || true)"
+          if [ -n "$AAB" ]; then cp "$AAB" "dist/VocabLedger-${VN}-${VC}.aab"; fi
+          {
+            echo "apkName=$NAME"
+            echo "apkSize=$(du -h "dist/$NAME" | cut -f1)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify the APK can update an installed build
+        run: |
+          set -euo pipefail
+          APK="dist/${{ steps.pack.outputs.apkName }}"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          AAPT="$(ls "$SDK_ROOT"/build-tools/*/aapt 2>/dev/null | sort -V | tail -1)"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          echo "$BADGING" | grep -E "^(package|sdkVersion|targetSdkVersion|application-label):" || true
+          echo "$BADGING" | grep -q "package: name='${APP_ID}'" \
+            || { echo "::error::applicationId is not ${APP_ID} — this APK would install as a separate app instead of updating the installed one."; exit 1; }
+          echo "$BADGING" | grep -q "versionCode='${{ steps.ver.outputs.versionCode }}'" \
+            || { echo "::error::APK versionCode does not match the requested build."; exit 1; }
+          echo "$BADGING" | grep -q "versionName='${{ steps.ver.outputs.versionName }}'" \
+            || { echo "::error::APK versionName does not match the requested build."; exit 1; }
+          echo "Signing certificate:"
+          keytool -printcert -jarfile "$APK" 2>/dev/null | grep -E "Owner:|SHA256:" | head -4 \
+            || echo "  (v2/v3-only signature — keytool cannot print it, which is expected for a modern build)"
+
+      - name: Job summary
+        run: |
+          {
+            echo "### Vocab Ledger ${{ steps.ver.outputs.versionName }} (versionCode ${{ steps.ver.outputs.versionCode }})"
+            echo ""
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| APK | \`${{ steps.pack.outputs.apkName }}\` (${{ steps.pack.outputs.apkSize }}) |"
+            echo "| Release-signed | ${{ steps.sign.outputs.signed }} |"
+            echo "| applicationId | \`${APP_ID}\` (unchanged → installs over the previous version) |"
+            echo ""
+            echo "User data (progress, streaks, mistake book) lives in the WebView's localStorage"
+            echo "and is untouched by an in-place update."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: VocabLedger-${{ steps.ver.outputs.versionName }}-${{ steps.ver.outputs.versionCode }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
