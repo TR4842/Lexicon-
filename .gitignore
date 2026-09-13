@@ -1,0 +1,9 @@
+# dependencies
+node_modules/
+
+# generated dataset duplicate (app/data/vocab.js is the committed source)
+app/data/vocab.json
+
+# misc
+*.log
+.DS_Store
