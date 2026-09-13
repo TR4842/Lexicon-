@@ -42,6 +42,73 @@ const ok = (cond, label) => {
   if (!cond) failed++;
 };
 
+/* A store-only jsdom instance, optionally pre-seeded with an old save file. */
+function freshStore(seedKey, seedValue) {
+  const d = new JSDOM("<!doctype html><html><body></body></html>", {
+    url: "http://localhost:8080/", pretendToBeVisual: true, runScripts: "dangerously",
+  });
+  if (seedKey) d.window.localStorage.setItem(seedKey, seedValue);
+  for (const f of ["data/vocab.js", "js/store.js"]) {
+    const s = d.window.document.createElement("script");
+    s.textContent = fs.readFileSync(path.join(ROOT, f), "utf8");
+    d.window.document.body.appendChild(s);
+  }
+  return d;
+}
+
+/* Upgrading from an older build must keep every bit of learner progress. */
+function upgradeChecks() {
+  const legacy = {
+    v: 1,
+    profile: { name: "Ayesha", gender: "girl", avatar: "assets/avatars/girl-2.png", createdAt: "2026-01-04" },
+    currentDay: 7,
+    studied: { "1-1": true, "1-2": true, "1-3": true },
+    days: { 1: { date: "2026-01-04", exam: { s: 19, t: 20, p: true, at: "2026-01-04" } } },
+    activity: { "2026-01-04": true },
+    mistakes: { w010101: { c: 2, healed: 1, last: "2026-01-05" } },
+    stats: { answered: 40, correct: 35, exams: 2, examsPassed: 1 },   // older build: no rev/revPassed
+    examCount: 42,                                                    // out-of-range value from an old build
+    sound: false,
+    seen: { "1-1": [0, 1, 2] },                                       // field blank() never declared
+  };
+  const raw = JSON.stringify(legacy);
+
+  const d = freshStore("vocabLedger.state.v1", raw);
+  const S = d.window.Store;
+  ok(S.state.profile.name === "Ayesha", "profile survived the upgrade");
+  ok(S.state.currentDay >= 7, "currentDay survived the upgrade");
+  ok(Object.keys(S.state.studied).length === 3, "studied groups survived");
+  ok(S.state.days[1] && S.state.days[1].exam.p === true, "exam results survived");
+  ok(S.state.mistakes.w010101.c === 2, "mistake book survived");
+  ok(S.state.stats.answered === 40, "old statistics kept");
+  ok(S.state.stats.revPassed === 0 && S.state.stats.rev === 0, "statistics added by the new version default safely");
+  ok(S.accuracy() === 88, `derived stats still compute (${S.accuracy()}% accuracy)`);
+  ok(S.state.sound === false, "settings survived");
+  ok(JSON.stringify(S.state.seen) === JSON.stringify({ "1-1": [0, 1, 2] }), "fields unknown to the old defaults survived");
+  ok(S.state.examCount === 20, "out-of-range examCount normalised by the migration");
+  ok(S.state.v === S.SCHEMA, "state stamped with the current schema version");
+  ok(!!d.window.localStorage.getItem("vocabLedger.state.v1.bak"), "pre-migration snapshot (.bak) written");
+
+  /* a save written under an older key must be adopted, not ignored */
+  const d2 = freshStore("vocabLedger.state", raw);
+  ok(d2.window.Store.state.profile.name === "Ayesha", "state under a legacy storage key is adopted");
+  ok(!!d2.window.localStorage.getItem("vocabLedger.state.v1"), "adopted state is written to the canonical key");
+
+  /* corrupt storage must not brick the app */
+  const d3 = freshStore("vocabLedger.state.v1", "{not json");
+  ok(d3.window.Store.state.profile === null, "corrupt save falls back to a fresh state instead of crashing");
+
+  /* export → import round trip */
+  const blob = S.exportState();
+  ok(JSON.parse(blob).state.profile.name === "Ayesha", "export contains the full state");
+  const d4 = freshStore(null, null);
+  const res = d4.window.Store.importState(blob);
+  ok(res.ok === true, "import accepts an exported backup");
+  ok(d4.window.Store.state.profile.name === "Ayesha" && Object.keys(d4.window.Store.state.studied).length === 3, "import restores progress");
+  ok(d4.window.Store.importState("nope").ok === false, "import rejects garbage without touching current state");
+  ok(d4.window.Store.state.profile.name === "Ayesha", "failed import left the restored state intact");
+}
+
 (async function main() {
   const { Store, UI, App } = w;
   await wait(120); // let DOMContentLoaded fire & boot run
@@ -163,6 +230,19 @@ const ok = (cond, label) => {
   click($('.navitem[data-go="lists"]')); await wait(20);
   ok($$(".acc").length === 12, "12 word lists listed");
   ok($(".acc[data-l='2']").classList.contains("lockedlist"), "list 2 still locked");
+
+  console.log("\n— upgrading over a previous version (no data loss) —");
+  upgradeChecks();
+
+  console.log("\n— about screen —");
+  click($("#burger")); await wait(10);
+  click($('.navitem[data-go="about"]')); await wait(20);
+  ok($("#view").innerHTML.includes(Store.APP_VERSION), "about screen shows the real app version");
+  ok($("#bkOut") && $("#bkIn"), "backup & restore offered");
+  click($("#bkOut")); await wait(20);
+  const ta = $("#modal-root textarea");
+  ok(ta && JSON.parse(ta.value).state.profile, "backup modal contains a parsable state");
+  click($$("#modal-root .btn")[0]); await wait(400);
 
   console.log(failed ? `\n${failed} CHECK(S) FAILED\n` : "\nALL CHECKS PASSED ✅\n");
   process.exit(failed ? 1 : 0);

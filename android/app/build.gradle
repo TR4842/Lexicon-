@@ -1,5 +1,27 @@
 apply plugin: 'com.android.application'
 
+/* ---------------------------------------------------------------------------
+   Release signing (optional, but REQUIRED for an install-over-the-top update).
+   Drop a `keystore.properties` next to android/build.gradle (see
+   keystore.properties.example). Without it the release build stays unsigned
+   and CI falls back to a debug-signed APK.
+   The same keystore must be reused for every release: Android only updates an
+   installed app when applicationId AND the signing certificate match.
+   --------------------------------------------------------------------------- */
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
+/* Version can be overridden from CI: -PversionCode=7 -PversionName=1.2.0
+   Bump DEFAULT_VERSION_CODE on every public build, otherwise Android refuses to
+   install the new APK over the old one. */
+def DEFAULT_VERSION_CODE = 2
+def DEFAULT_VERSION_NAME = '1.0.1'
+def appVersionCode = Integer.parseInt((project.findProperty('versionCode') ?: DEFAULT_VERSION_CODE).toString())
+def appVersionName = (project.findProperty('versionName') ?: DEFAULT_VERSION_NAME).toString()
+
 android {
     namespace "com.tusherkhan.vocabledger"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +29,8 @@ android {
         applicationId "com.tusherkhan.vocabledger"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode appVersionCode
+        versionName appVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +38,29 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                def storePath = keystoreProperties['storeFile']
+                if (!storePath) throw new GradleException("keystore.properties has no storeFile")
+                def store = rootProject.file(storePath)
+                if (!store.exists()) throw new GradleException("Release keystore not found: ${store} — without it the APK cannot update an installed build.")
+                storeFile store
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (keystorePropertiesFile.exists()) {
+                signingConfig signingConfigs.release
+            } else {
+                logger.warn("keystore.properties not found - the release APK will be UNSIGNED and cannot update an installed build.")
+            }
         }
     }
 }

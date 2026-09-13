@@ -759,7 +759,7 @@
       <div class="card pad-lg center" style="margin-top:16px;background:var(--grad-sunset)">
         <div class="about-logo"><img src="assets/icons/app-logo.png" alt="Vocab Ledger logo"></div>
         <h3 style="justify-content:center;font-size:1.5rem">Vocab Ledger</h3>
-        <p class="hint" style="color:rgba(74,59,46,.75)">version 1.0 · fully offline · made with love</p>
+        <p class="hint" style="color:rgba(74,59,46,.75)">version ${esc(Store.APP_VERSION)} · fully offline · made with love</p>
       </div>
       <div class="card">
         <h3>${icon("heart")} Credits</h3>
@@ -783,17 +783,87 @@
         · Every 2 days: a 40-question revision exam — 90% to unlock the next days.<br>
         · Everything is stored on this device. No internet needed, ever.</p>
       </div>
+      <div class="card">
+        <h3>${icon("heart")} Backup &amp; restore</h3>
+        <p class="hint">Progress is stored on this device and survives app updates. Still, copy a backup before uninstalling or moving to a new phone — then paste it back to restore everything.</p>
+        <div class="btn-row mt12">
+          <button class="btn ghost grow" id="bkOut">${icon("send")} Copy backup</button>
+          <button class="btn ghost grow" id="bkIn">${icon("refresh")} Restore</button>
+        </div>
+      </div>
       <div class="btn-row">
         <button class="btn ghost grow" id="edit2">${icon("user")} Edit profile</button>
         <button class="btn ghost grow" id="reset">${icon("refresh")} Reset progress</button>
       </div>
       <div style="height:20px"></div>`;
     $("#edit2").onclick = () => go("profile");
+    $("#bkOut").onclick = () => { sfx.click(); showBackup(); };
+    $("#bkIn").onclick = () => { sfx.click(); showRestore(); };
     $("#reset").onclick = () => confirmBox({
       title: "Reset everything?", text: "Name, avatar, calendar, exams and mistakes will be erased. This cannot be undone.",
       okLabel: "Erase all", onOk: () => { Store.resetAll(); location.reload(); },
     });
   };
+
+  /* ---------- backup & restore (no permissions, no network) ---------- */
+  const lastTextarea = () => {
+    const t = document.querySelectorAll("#modal-root textarea");
+    return t[t.length - 1] || null;
+  };
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+    return new Promise((resolve, reject) => {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.setAttribute("readonly", "");
+        ta.style.cssText = "position:fixed;top:-1000px;opacity:0";
+        document.body.appendChild(ta); ta.select();
+        const okc = document.execCommand && document.execCommand("copy");
+        ta.remove();
+        okc ? resolve() : reject(new Error("copy unsupported"));
+      } catch (e) { reject(e); }
+    });
+  }
+  function showBackup() {
+    modal({
+      tint: "var(--grad-sky)", glyph: "send", title: "Your backup",
+      html: `<p>Long-press the text and copy it somewhere safe (notes, chat, email).</p>
+             <textarea id="bkText" readonly spellcheck="false">${esc(Store.exportState())}</textarea>`,
+      buttons: [
+        { label: "Close", style: "ghost" },
+        {
+          label: "Copy", icon: "send",
+          onClick: () => {
+            const ta = lastTextarea();
+            copyText(ta ? ta.value : Store.exportState())
+              .then(() => toast("Backup copied 💾"))
+              .catch(() => toast("Select the text and copy it manually"));
+          },
+        },
+      ],
+    });
+    const ta = lastTextarea();
+    if (ta) ta.onfocus = () => ta.select();
+  }
+  function showRestore() {
+    modal({
+      tint: "var(--grad-butter)", glyph: "refresh", title: "Restore a backup",
+      html: `<p>Paste a Vocab Ledger backup below. It replaces the progress on this device.</p>
+             <textarea id="bkIn" placeholder='{"app":"vocab-ledger", …}' spellcheck="false"></textarea>`,
+      buttons: [
+        { label: "Cancel", style: "ghost" },
+        {
+          label: "Restore", icon: "check",
+          onClick: () => {
+            const ta = lastTextarea();
+            const res = Store.importState(ta ? ta.value : "");
+            if (res.ok) { sfx.win(); toast("Backup restored — reloading"); setTimeout(() => location.reload(), 900); }
+            else { sfx.bad(); toast(res.reason || "That backup could not be read"); }
+          },
+        },
+      ],
+    });
+  }
 
   /* ---------- profile edit ---------- */
   SCREENS.profileEdit = function () { SCREENS.onboarding(true); };

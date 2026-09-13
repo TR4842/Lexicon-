@@ -2,7 +2,22 @@
    Vocab Ledger — state, curriculum rules & persistence
    ============================================================ */
 (function () {
+  /* ---------------------------------------------------------------------------
+     Persistence contract — READ BEFORE CHANGING ANY OF THIS.
+     * KEY is permanent. Renaming it orphans every existing install's progress,
+       which is exactly the "update loses my data" bug we must never ship.
+     * The saved shape may only grow. New fields are picked up by deep-merging
+       blank() over the stored object, so an old save file always loads.
+     * Anything that has to *move* data (rename a field, restructure a map) goes
+       into MIGRATIONS keyed by the version it upgrades FROM, plus a SCHEMA bump.
+     * load() keeps a `.bak` snapshot of the previous payload before migrating,
+       so a bad migration can never destroy the only copy of a learner's history.
+     --------------------------------------------------------------------------- */
   const KEY = "vocabLedger.state.v1";
+  const LEGACY_KEYS = ["vocabLedger.state", "vocabLedger"];   // older builds, read-only fallback
+  const SCHEMA = 2;                 // bump together with a MIGRATIONS entry
+  const APP_VERSION = "1.0.1";      // keep in sync with package.json + android versionName
+
   const V = () => window.VOCAB;
 
   const CURRICULUM = {
@@ -18,7 +33,7 @@
 
   function blank() {
     return {
-      v: 1,
+      v: SCHEMA,
       profile: null,                       // {name, gender, avatar, createdAt}
       currentDay: 1,
       studied: {},                         // "l-g" -> true
@@ -31,23 +46,92 @@
     };
   }
 
+  /* ---------- versioned migrations (each takes a state, returns a state) ---- */
+  const MIGRATIONS = {
+    /* v1 -> v2: no shape change, just normalise values older builds could
+       leave behind (an out-of-range examCount, a missing `seen` map). */
+    1: (s) => {
+      if ([20, 25, 30].indexOf(s.examCount) === -1) s.examCount = 20;
+      s.seen = s.seen && typeof s.seen === "object" ? s.seen : {};
+      s.stats = s.stats && typeof s.stats === "object" ? s.stats : {};
+      return s;
+    },
+  };
+
+  const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+  /* Deep-merge a saved payload over the defaults: every key the new version
+     expects exists, and nothing the old version stored is thrown away. */
+  function withDefaults(base, saved) {
+    const out = Array.isArray(base) ? base.slice() : Object.assign({}, base);
+    Object.keys(saved || {}).forEach((k) => {
+      const sv = saved[k];
+      if (sv === undefined) return;
+      out[k] = isObj(out[k]) && isObj(sv) ? withDefaults(out[k], sv) : sv;
+    });
+    return out;
+  }
+
+  function migrate(state) {
+    let v = typeof state.v === "number" ? state.v : 1;
+    while (v < SCHEMA) {
+      const step = MIGRATIONS[v];
+      if (step) {
+        try { state = step(state) || state; } catch (e) { /* keep what we have */ }
+      }
+      v++;
+    }
+    state.v = SCHEMA;
+    return state;
+  }
+
   /* storage with in-memory fallback (some embedded webviews block localStorage) */
   const mem = {};
   const LS = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return k in mem ? mem[k] : null; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch (e) { mem[k] = v; } },
+    del(k) { try { localStorage.removeItem(k); } catch (e) { delete mem[k]; } },
   };
 
   let S = load();
 
   function load() {
-    try {
-      const raw = LS.get(KEY);
-      if (raw) return Object.assign(blank(), JSON.parse(raw));
-    } catch (e) { /* corrupted -> start fresh */ }
+    const keys = [KEY].concat(LEGACY_KEYS);
+    for (let i = 0; i < keys.length; i++) {
+      const raw = LS.get(keys[i]);
+      if (!raw) continue;
+      let parsed;
+      try { parsed = JSON.parse(raw); } catch (e) { continue; }   // unreadable -> try the next key
+      if (!isObj(parsed)) continue;
+      LS.set(keys[i] + ".bak", raw);            // snapshot before we touch anything
+      const next = migrate(withDefaults(blank(), parsed));
+      LS.set(KEY, JSON.stringify(next));        // adopt legacy saves under the canonical key
+      return next;                              // NB: never touch S here — load() runs while S is still initialising
+    }
     return blank();
   }
   function save() { LS.set(KEY, JSON.stringify(S)); }
+
+  /* ---------- backup / restore (for reinstalls and device changes) ---------- */
+  function exportState() {
+    return JSON.stringify({ app: "vocab-ledger", appVersion: APP_VERSION, schema: SCHEMA, exportedAt: new Date().toISOString(), state: S });
+  }
+  /* Accepts either a raw state object or an exportState() envelope.
+     Returns {ok, reason} and leaves the current state untouched on failure. */
+  function importState(text) {
+    let data;
+    try { data = JSON.parse(text); } catch (e) { return { ok: false, reason: "That isn't valid JSON." }; }
+    if (data && isObj(data.state)) data = data.state;
+    if (!isObj(data) || !isObj(data.profile)) return { ok: false, reason: "No profile found in that backup." };
+    try {
+      LS.set(KEY + ".bak", JSON.stringify(S));       // keep the pre-restore state recoverable
+      S = migrate(withDefaults(blank(), data));
+      save();
+      return { ok: true, reason: "" };
+    } catch (e) {
+      return { ok: false, reason: "Could not restore that backup." };
+    }
+  }
 
   /* ---------- date helpers ---------- */
   const pad = (n) => String(n).padStart(2, "0");
@@ -200,8 +284,10 @@
 
   window.Store = {
     CURRICULUM,
+    APP_VERSION, SCHEMA, KEY,
     get state() { return S; },
     save, load,
+    exportState, importState,
     today, dkey, parseKey,
     dayInfo, wordsOf, dayWords, revWords,
     isStudied, markStudy, dayStudied, dayExamPassed, dayRevPassed, dayComplete,

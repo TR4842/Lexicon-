@@ -1,6 +1,12 @@
 # dependencies
 node_modules/
 
+# signing material — never commit these (a leaked key can't be rotated without
+# breaking updates for everyone who already has the app installed)
+android/keystore.properties
+*.keystore
+*.jks
+
 # generated dataset duplicate (app/data/vocab.js is the committed source)
 app/data/vocab.json
 
